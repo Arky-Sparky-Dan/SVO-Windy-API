@@ -4,8 +4,12 @@
 
 [allsky]
 # Full path to the image AllSky overwrites on every capture.
-# AllskyTeam/allsky default on Raspberry Pi:
-image_path = /home/pi/allsky/tmp/image.jpg
+#
+# Windows example:
+image_path = C:\allsky\tmp\image.jpg
+#
+# Linux / Raspberry Pi example:
+# image_path = /home/pi/allsky/tmp/image.jpg
 
 [ftp]
 # Hostinger FTP credentials — find these in hPanel → FTP Accounts
@@ -13,7 +17,7 @@ host     = files.hostinger.com
 username = YOUR_FTP_USERNAME
 password = YOUR_FTP_PASSWORD
 
-# Path on the server (relative to FTP root, which is usually public_html)
+# Path on the server relative to FTP root (which maps to public_html/)
 remote_path = public_html/allsky/Current.jpg
 
 # How often to upload a fresh image (seconds). 60 = once per minute.
@@ -26,8 +30,8 @@ timeout_seconds = 30
 # Your Windy.com API key
 api_key = YOUR_WINDY_API_KEY
 
-# Upload endpoint — to be filled in once Windy confirms the URL.
-# Leave blank until then; the script will skip the Windy POST step.
+# Upload endpoint — fill in once Windy confirms the URL.
+# Leave blank to skip the Windy POST step for now.
 upload_endpoint =
 
 # Set to true to enable Windy POST uploads (requires upload_endpoint above)
@@ -37,6 +41,12 @@ enabled = false
 # Log verbosity: DEBUG, INFO, WARNING, ERROR
 level = INFO
 
-# Optional log file. Leave blank to log to stdout only.
+# Log file path. Recommended on Windows so you can review logs easily.
+# Windows example:
+log_file = C:\allsky-windy\allsky_windy.log
+#
+# Linux example:
 # log_file = /home/pi/allsky_windy.log
-log_file =
+#
+# Leave blank to log to console only:
+# log_file =
