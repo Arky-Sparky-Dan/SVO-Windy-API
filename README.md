@@ -7,147 +7,113 @@ Connects the **ZWO ASI 224MC** all-sky camera at SVO Observatory to **Windy.com'
 
 ---
 
-## How Windy works
+## Architecture
 
-Windy.com uses a **pull model** — you give them a public image URL and they fetch it on their schedule (~every 60 seconds). No upload API exists; the image just needs to be at a stable, publicly accessible URL.
+AllSky already handles everything — it captures the image and FTPs it to Hostinger automatically. This repo documents the setup and contains the one config file needed to fix caching.
 
 ```
 ASI 224MC camera
       │
       ▼
-  AllSky (captures every N seconds, overwrites Current.jpg)
-      │
+  AllSky (captures every N seconds)
+      │  FTP upload (built into AllSky)
       ▼
-  https://svo.space/allsky/Current.jpg   ← stable public URL
-      │
-      ▼  Windy fetches ~every 60 s
-  windy.com/webcams/...  ← SVO Observatory appears here
+  Hostinger  →  https://svo.space/allsky/Current.jpg
+                          │
+                          ▼  Windy fetches ~every 60 s
+                 windy.com/webcams/...
 ```
 
 ---
 
-## Current status
+## Setup checklist
 
-| Item | Status |
+| Step | Status |
 |------|--------|
 | AllSky running + capturing | ✅ |
+| AllSky FTP upload to Hostinger configured | ✅ |
 | Image publicly accessible | ✅ `https://svo.space/allsky/Current.jpg` |
-| Cache-Control header fixed | ⚠️ see below |
-| Windy webcam registered | ⏳ pending |
+| Cache-Control header fixed | ⚠️ do this first — see below |
+| Windy webcam registered | ⏳ do after cache fix |
 
 ---
 
-## ⚠️ Fix required: Cache-Control header
+## Step 1 — Fix the cache header on Hostinger
 
-The web server currently sends `Cache-Control: public, max-age=604800` (7 days) for `Current.jpg`. This means CDNs and Windy's fetcher may serve a week-old image instead of the latest frame.
+The web server currently tells browsers and CDNs to cache `Current.jpg` for **7 days**. Windy would show a week-old image. Fix this by uploading a `.htaccess` file to the `/allsky/` folder on Hostinger.
 
-**Fix on the web server** — add a location rule for `Current.jpg` to send a short max-age. Example for **nginx**:
+**Option A — Hostinger File Manager (easiest)**
+1. Log into [hpanel.hostinger.com](https://hpanel.hostinger.com)
+2. Go to **Files → File Manager**
+3. Navigate to the `public_html/allsky/` folder
+4. Click **New File**, name it `.htaccess`
+5. Paste the contents of `hostinger/.htaccess` from this repo
+6. Save
 
-```nginx
-location = /allsky/Current.jpg {
-    expires 30s;
-    add_header Cache-Control "public, max-age=30, must-revalidate";
-}
-```
+**Option B — FTP**
+1. Connect to Hostinger via FTP (credentials in hPanel → FTP Accounts)
+2. Upload `hostinger/.htaccess` to `public_html/allsky/.htaccess`
 
-For **Apache** (`.htaccess` or vhost config):
-
-```apache
-<Files "Current.jpg">
-    Header set Cache-Control "public, max-age=30, must-revalidate"
-    Header set Expires "30"
-</Files>
-```
-
-After updating, verify with:
-
+**Verify it worked:**
 ```bash
-curl -sI https://svo.space/allsky/Current.jpg | grep -i cache
+curl -sI https://svo.space/allsky/Current.jpg | grep -i cache-control
 # Should show: cache-control: public, max-age=30, must-revalidate
 ```
 
 ---
 
-## Register on Windy.com
+## Step 2 — Register on Windy.com
+
+Once the cache header is confirmed fixed:
 
 1. Go to [windy.com/webcams/add](https://www.windy.com/webcams/add)
 2. Fill in:
-   - **Location:** SVO Observatory coordinates
-   - **Name:** e.g. `SVO Observatory All-Sky Camera`
-   - **Description:** ZWO ASI 224MC fisheye all-sky camera
+   - **Location:** SVO Observatory GPS coordinates
+   - **Name:** `SVO Observatory All-Sky Camera`
+   - **Description:** ZWO ASI 224MC 180° fisheye all-sky camera
    - **Image URL:** `https://svo.space/allsky/Current.jpg`
 3. Submit — Windy reviews and approves within a few days
 
 ---
 
-## Optional: `allsky_windy.py` monitoring companion
+## AllSky FTP upload configuration
 
-The script in this repo is **not required** for Windy integration (the image is already public), but it provides:
+AllSky uploads `Current.jpg` to Hostinger automatically. To review or change the FTP settings, open the AllSky web interface on the observatory PC and go to **Settings → FTP**.
 
-- Live logging of every time the image file updates on disk
-- Staleness warnings if AllSky stops capturing
-- A `/status` JSON health endpoint
-- A local browser preview page at `http://localhost:8080`
-
-### Run it
-
-```bash
-cp config.ini.example config.ini
-# Edit config.ini — set image_path to your AllSky output file
-python3 allsky_windy.py
-```
-
-### Run as a systemd service (auto-start on boot)
-
-```bash
-nano systemd/allsky-windy.service   # update User and WorkingDirectory
-sudo cp systemd/allsky-windy.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable allsky-windy
-sudo systemctl start allsky-windy
-sudo journalctl -u allsky-windy -f  # live logs
-```
-
-### Configuration (`config.ini`)
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `allsky.image_path` | `~/allsky/tmp/image.jpg` | Path AllSky writes its current frame to |
-| `allsky.stale_threshold_seconds` | `120` | Warn if image hasn't updated in this many seconds |
-| `server.port` | `8080` | Local HTTP port for the companion server |
-| `logging.level` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
-| `logging.log_file` | *(blank)* | Optional log file path |
-
-### Endpoints
-
-| URL | Description |
-|-----|-------------|
-| `GET /image.jpg` | Serves the AllSky image directly from disk |
-| `GET /status` | JSON: last update time, age, file size |
-| `GET /` | Browser status page with live image preview |
+Key settings:
+| Setting | Value |
+|---------|-------|
+| FTP host | (Hostinger FTP hostname from hPanel) |
+| Remote path | `public_html/allsky/Current.jpg` |
+| Upload frequency | every capture (or every N captures) |
 
 ---
 
 ## Troubleshooting
 
-**Windy shows a stale image**
-- Fix the `Cache-Control` header (see above) — most likely cause
+**Windy shows a stale/old image**
+- Confirm the `.htaccess` fix is in place: `curl -sI https://svo.space/allsky/Current.jpg | grep cache`
+- Check AllSky FTP logs to confirm uploads are succeeding
 
-**AllSky stops updating**
-- `systemctl status allsky` on the observatory PC
-- The monitoring companion will log a staleness warning after 120 s
+**Image stops updating on svo.space**
+- Check AllSky is running on the observatory PC
+- Check AllSky FTP settings — Hostinger FTP password may have changed
+- Confirm disk space on Hostinger account hasn't been exhausted
 
-**Image returns 404 or 500**
-- Confirm AllSky is writing to the path in `config.ini`
-- Typical path on AllskyTeam/allsky: `/home/pi/allsky/tmp/image.jpg`
+**Windy can't reach the image**
+- Verify `https://svo.space/allsky/Current.jpg` loads in a browser
+- Check Hostinger service status at [status.hostinger.com](https://status.hostinger.com)
 
 ---
 
-## ASI 224MC notes
+## Files in this repo
 
-- Full 180° fisheye frames, typically captured every 30–120 seconds at night
-- During the day AllSky may slow down or pause capture
-- Image is overwritten in-place as `Current.jpg` on each capture
+| File | Purpose |
+|------|---------|
+| `hostinger/.htaccess` | Upload to `public_html/allsky/` on Hostinger to fix cache headers |
+| `allsky_windy.py` | Optional monitoring companion — logs image update times and staleness warnings |
+| `config.ini.example` | Config template for the monitoring companion |
+| `systemd/allsky-windy.service` | Run the monitoring companion as a systemd service |
 
 ---
 
