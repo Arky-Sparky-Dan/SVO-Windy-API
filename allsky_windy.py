@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-allsky_windy.py — AllSky → Hostinger → Windy.com uploader middleware
+allsky_windy.py — AllSky image freshness monitor for SVO Observatory
 
-Every 60 seconds:
-  1. Reads the latest AllSky image from disk
-  2. FTPs it to Hostinger as Current.jpg (atomic upload via temp-then-rename)
-  3. (Windy POST — ready to enable once the upload endpoint is confirmed)
+Watches the AllSky output image on disk and logs whenever it updates.
+Warns if the image goes stale so you know AllSky has stopped capturing.
 
-Runs on Windows and Linux. No third-party packages required.
+Windy.com integration does NOT require this script to run.
+Windy pulls directly from https://svo.space/allsky/Current.jpg on its
+own schedule. This script is a convenience tool only.
 
 Usage (Windows):
   python allsky_windy.py
@@ -17,9 +17,8 @@ Usage (Linux):
   python3 allsky_windy.py
 """
 
+import argparse
 import configparser
-import ftplib
-import io
 import logging
 import platform
 import signal
@@ -40,20 +39,8 @@ def load_config(path: str) -> configparser.ConfigParser:
     cfg = configparser.ConfigParser()
     cfg.read_dict({
         "allsky": {
-            "image_path": _default_image_path(),
-        },
-        "ftp": {
-            "host": "",
-            "username": "",
-            "password": "",
-            "remote_path": "public_html/allsky/Current.jpg",
-            "upload_interval_seconds": "60",
-            "timeout_seconds": "30",
-        },
-        "windy": {
-            "api_key": "",
-            "upload_endpoint": "",
-            "enabled": "false",
+            "image_path": r"C:\allsky\tmp\image.jpg" if IS_WINDOWS else "~/allsky/tmp/image.jpg",
+            "stale_threshold_seconds": "120",
         },
         "logging": {
             "level": "INFO",
@@ -61,181 +48,74 @@ def load_config(path: str) -> configparser.ConfigParser:
         },
     })
     if not Path(path).exists():
-        logging.error("config.ini not found at: %s", path)
-        logging.error("Copy config.ini.example to config.ini and fill in your credentials.")
-        sys.exit(1)
+        logging.warning("config.ini not found — using defaults. Copy config.ini.example to get started.")
+        return cfg
     cfg.read(path)
     logging.info("Loaded config from %s", path)
     return cfg
 
 
-def _default_image_path() -> str:
-    if IS_WINDOWS:
-        return r"C:\allsky\tmp\image.jpg"
-    return "~/allsky/tmp/image.jpg"
-
-
 # ---------------------------------------------------------------------------
-# Uploader
+# Monitor
 # ---------------------------------------------------------------------------
 
-class AllskyWindyUploader:
+class ImageMonitor:
     def __init__(self, cfg: configparser.ConfigParser):
-        self.image_path  = Path(cfg.get("allsky", "image_path")).expanduser().resolve()
-        self.interval    = cfg.getint("ftp", "upload_interval_seconds", fallback=60)
-        self.ftp_host    = cfg.get("ftp", "host")
-        self.ftp_user    = cfg.get("ftp", "username")
-        self.ftp_pass    = cfg.get("ftp", "password")
-        self.ftp_remote  = cfg.get("ftp", "remote_path")
-        self.ftp_timeout = cfg.getint("ftp", "timeout_seconds", fallback=30)
-        self.windy_key   = cfg.get("windy", "api_key", fallback="")
-        self.windy_url   = cfg.get("windy", "upload_endpoint", fallback="")
-        self.windy_on    = cfg.getboolean("windy", "enabled", fallback=False)
-
-        self._running      = True
-        self._upload_count = 0
-        self._error_count  = 0
-
-        if not self.ftp_host or not self.ftp_user or not self.ftp_pass:
-            logging.error("FTP credentials missing — set [ftp] host, username, password in config.ini")
-            sys.exit(1)
-
-    # ------------------------------------------------------------------
-    # Main loop
-    # ------------------------------------------------------------------
+        self.image_path = Path(cfg.get("allsky", "image_path")).expanduser().resolve()
+        self.stale_threshold = cfg.getint("allsky", "stale_threshold_seconds", fallback=120)
+        self._running = True
+        self._last_mtime: float = 0.0
+        self._update_count: int = 0
 
     def run(self):
         logging.info("=" * 60)
-        logging.info("AllSky → Windy uploader started  (platform: %s)", platform.system())
-        logging.info("  Image source : %s", self.image_path)
-        logging.info("  FTP host     : %s", self.ftp_host)
-        logging.info("  Remote path  : %s", self.ftp_remote)
-        logging.info("  Interval     : %d seconds", self.interval)
-        logging.info("  Windy POST   : %s", "enabled" if self.windy_on else "disabled")
+        logging.info("AllSky image monitor started  (platform: %s)", platform.system())
+        logging.info("  Watching : %s", self.image_path)
+        logging.info("  Stale after : %d seconds", self.stale_threshold)
+        logging.info("  Windy pulls from : https://svo.space/allsky/Current.jpg")
         logging.info("=" * 60)
 
+        warned_missing = False
+        warned_stale   = False
+
         while self._running:
-            start = time.monotonic()
-            self._tick()
-            elapsed = time.monotonic() - start
-            sleep_for = max(0, self.interval - elapsed)
-            if self._running:
-                time.sleep(sleep_for)
+            try:
+                if not self.image_path.exists():
+                    if not warned_missing:
+                        logging.warning("Image not found: %s — is AllSky running?", self.image_path)
+                        warned_missing = True
+                    time.sleep(5)
+                    continue
+
+                warned_missing = False
+                stat = self.image_path.stat()
+
+                if stat.st_mtime != self._last_mtime:
+                    self._last_mtime  = stat.st_mtime
+                    self._update_count += 1
+                    warned_stale = False
+                    logging.info(
+                        "Image updated — %d bytes  (update #%d)",
+                        stat.st_size, self._update_count,
+                    )
+                else:
+                    age = time.time() - stat.st_mtime
+                    if age > self.stale_threshold and not warned_stale:
+                        logging.warning(
+                            "Image has not updated in %.0f s (threshold: %d s) — "
+                            "check AllSky is capturing",
+                            age, self.stale_threshold,
+                        )
+                        warned_stale = True
+
+            except Exception as exc:
+                logging.error("Monitor error: %s", exc)
+
+            time.sleep(5)
 
     def stop(self):
-        logging.info("Shutting down...")
+        logging.info("Stopping monitor...")
         self._running = False
-
-    # ------------------------------------------------------------------
-    # Single upload cycle
-    # ------------------------------------------------------------------
-
-    def _tick(self):
-        if not self.image_path.exists():
-            logging.warning("Image not found: %s — is AllSky running?", self.image_path)
-            return
-
-        try:
-            image_data = self.image_path.read_bytes()
-        except OSError as exc:
-            logging.error("Could not read image: %s", exc)
-            return
-
-        stat = self.image_path.stat()
-        age  = time.time() - stat.st_mtime
-        logging.debug("Read %d bytes (file age: %.0f s)", len(image_data), age)
-
-        self._ftp_upload(image_data)
-
-        if self.windy_on and self.windy_url and self.windy_key:
-            self._windy_post(image_data)
-
-    # ------------------------------------------------------------------
-    # FTP upload (atomic: upload to .tmp then rename)
-    # ------------------------------------------------------------------
-
-    def _ftp_upload(self, data: bytes):
-        remote_path = self.ftp_remote
-        parts       = remote_path.replace("\\", "/").split("/")
-        remote_dir  = "/".join(parts[:-1]) or "."
-        remote_file = parts[-1]
-        temp_file   = remote_file + ".tmp"
-
-        try:
-            with ftplib.FTP() as ftp:
-                ftp.connect(self.ftp_host, timeout=self.ftp_timeout)
-                ftp.login(self.ftp_user, self.ftp_pass)
-                ftp.set_pasv(True)
-
-                if remote_dir and remote_dir != ".":
-                    ftp.cwd(remote_dir)
-
-                # Upload to temp file so Current.jpg is never partially written
-                ftp.storbinary(f"STOR {temp_file}", io.BytesIO(data))
-
-                # Rename temp → final
-                try:
-                    ftp.rename(temp_file, remote_file)
-                except ftplib.error_perm:
-                    # Some servers refuse rename over existing file — delete first
-                    try:
-                        ftp.delete(remote_file)
-                    except ftplib.error_perm:
-                        pass
-                    ftp.rename(temp_file, remote_file)
-
-            self._upload_count += 1
-            self._error_count  = 0
-            logging.info(
-                "FTP upload OK — %d bytes → %s/%s  (total: %d)",
-                len(data), self.ftp_host, remote_path, self._upload_count,
-            )
-
-        except ftplib.all_errors as exc:
-            self._error_count += 1
-            logging.error("FTP upload failed (error #%d): %s", self._error_count, exc)
-            if self._error_count >= 5:
-                logging.warning("5 consecutive FTP errors — check credentials and Hostinger FTP host")
-
-    # ------------------------------------------------------------------
-    # Windy API POST (stub — enable once endpoint is confirmed)
-    # ------------------------------------------------------------------
-
-    def _windy_post(self, data: bytes):
-        """
-        POST the image to Windy's webcam upload endpoint.
-        Set upload_endpoint and enabled = true in config.ini once Windy
-        confirms the URL and request format.
-        """
-        import urllib.request
-        import urllib.error
-
-        # Placeholder — uncomment and adapt once Windy confirms the endpoint:
-        #
-        # boundary = "----WindyUpload"
-        # body = (
-        #     f"--{boundary}\r\n"
-        #     f'Content-Disposition: form-data; name="image"; filename="image.jpg"\r\n'
-        #     f"Content-Type: image/jpeg\r\n\r\n"
-        # ).encode() + data + f"\r\n--{boundary}--\r\n".encode()
-        # req = urllib.request.Request(
-        #     self.windy_url,
-        #     data=body,
-        #     headers={
-        #         "x-windy-api-key": self.windy_key,
-        #         "Content-Type": f"multipart/form-data; boundary={boundary}",
-        #     },
-        #     method="POST",
-        # )
-        # try:
-        #     with urllib.request.urlopen(req, timeout=15) as resp:
-        #         logging.info("Windy POST OK — HTTP %d", resp.status)
-        # except urllib.error.HTTPError as exc:
-        #     logging.error("Windy POST failed: HTTP %d %s", exc.code, exc.reason)
-        # except urllib.error.URLError as exc:
-        #     logging.error("Windy POST error: %s", exc.reason)
-
-        logging.debug("Windy POST not yet configured — add upload_endpoint to config.ini")
 
 
 # ---------------------------------------------------------------------------
@@ -255,38 +135,31 @@ def setup_logging(level_str: str, log_file: str):
     )
 
 
-def _setup_signals(uploader: "AllskyWindyUploader"):
-    """Register shutdown signals — SIGINT works on both platforms; SIGTERM on Linux only."""
-    signal.signal(signal.SIGINT, lambda s, f: uploader.stop())
-    if not IS_WINDOWS:
-        signal.signal(signal.SIGTERM, lambda s, f: uploader.stop())
-
-
 def main():
-    import argparse
-    parser = argparse.ArgumentParser(description="AllSky → Windy.com uploader")
+    parser = argparse.ArgumentParser(description="AllSky image freshness monitor")
     parser.add_argument(
-        "--config",
-        default="config.ini",
+        "--config", default="config.ini",
         help="Path to config file (default: config.ini next to this script)",
     )
     args = parser.parse_args()
 
-    # Resolve config path relative to this script so it works when run from
-    # Task Scheduler with a different working directory
     config_path = Path(args.config)
     if not config_path.is_absolute():
         config_path = Path(__file__).parent / config_path
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s")
 
-    cfg      = load_config(str(config_path))
-    log_file = cfg.get("logging", "log_file", fallback="")
-    setup_logging(cfg.get("logging", "level", fallback="INFO"), log_file)
+    cfg     = load_config(str(config_path))
+    setup_logging(cfg.get("logging", "level", fallback="INFO"),
+                  cfg.get("logging", "log_file", fallback=""))
 
-    uploader = AllskyWindyUploader(cfg)
-    _setup_signals(uploader)
-    uploader.run()
+    monitor = ImageMonitor(cfg)
+
+    signal.signal(signal.SIGINT, lambda s, f: monitor.stop())
+    if not IS_WINDOWS:
+        signal.signal(signal.SIGTERM, lambda s, f: monitor.stop())
+
+    monitor.run()
     logging.info("Stopped.")
 
 

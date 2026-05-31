@@ -1,38 +1,40 @@
 # SVO Observatory — Windy.com Webcam Integration
 
-Uploads the **ZWO ASI 224MC** all-sky camera image from SVO Observatory to **Windy.com** every 60 seconds.
+Connects the **ZWO ASI 224MC** all-sky camera at SVO Observatory to **Windy.com's** live webcam map.
 
 **Live image:** `https://svo.space/allsky/Current.jpg`
 **Observatory site:** https://SVO.space/current-sky/
-**Platform:** Windows Embedded PC + AllSky
 
 ---
 
 ## How it works
 
+Windy.com uses a **pull model** — you give them a public URL and they fetch it on their schedule (~every 60 seconds). No upload API exists and no API key is required for webcam registration.
+
 ```
 ASI 224MC camera
       │
       ▼
-  AllSky on Windows PC (captures every N seconds, writes image to disk)
+  AllSky (captures & FTPs image to Hostinger automatically)
       │
       ▼
-  allsky_windy.py  (Windows Task Scheduler, runs every 60 s)
-      ├─── FTP upload ──→  Hostinger  →  https://svo.space/allsky/Current.jpg
-      └─── POST image ──→  Windy.com API  (enabled once endpoint is confirmed)
+  https://svo.space/allsky/Current.jpg   ← stable public URL
+      │
+      ▼  Windy fetches ~every 60 s
+  windy.com/webcams/...
 ```
 
 ---
 
-## Setup
+## Setup — 3 steps
 
-### Step 1 — Fix the cache header on Hostinger
+### Step 1 — Fix cache headers on Hostinger
 
-Upload `hostinger/.htaccess` to `public_html/allsky/` via Hostinger File Manager so Windy always gets a fresh image.
+The server currently caches `Current.jpg` for 7 days. Windy would show a week-old image without this fix.
 
 1. Log into [hpanel.hostinger.com](https://hpanel.hostinger.com)
 2. **Files → File Manager** → navigate to `public_html/allsky/`
-3. **New File** → name it `.htaccess`, paste this content and save:
+3. Create a new file called `.htaccess` and paste:
 
 ```apache
 <Files "Current.jpg">
@@ -41,143 +43,88 @@ Upload `hostinger/.htaccess` to `public_html/allsky/` via Hostinger File Manager
 </Files>
 ```
 
-Verify:
+4. Save, then verify:
 ```
-curl -sI https://svo.space/allsky/Current.jpg | grep -i cache-control
+curl -sI https://svo.space/allsky/Current.jpg | grep cache-control
 # Should show: max-age=30
 ```
 
----
-
-### Step 2 — Install Python on the observatory PC
-
-1. Download Python 3.9+ from [python.org/downloads](https://www.python.org/downloads/)
-2. During install, check **"Add Python to PATH"**
-3. Verify in a Command Prompt:
-   ```
-   python --version
-   ```
-
-No third-party packages are needed — the script uses only the Python standard library.
+The file is also at `hostinger/.htaccess` in this repo for reference.
 
 ---
 
-### Step 3 — Install the script
+### Step 2 — Register on Windy.com
 
-1. Download this repo as a ZIP from GitHub (green **Code** button → Download ZIP)  
-   — or clone if Git is installed: `git clone https://github.com/Arky-Sparky-Dan/SVO-Windy-API.git`
-2. Copy the folder to `C:\allsky-windy\`
-3. Copy `config.ini.example` → `config.ini`
-4. Edit `config.ini` — fill in the FTP credentials and AllSky image path:
+1. Go to [windy.com/webcams/add](https://www.windy.com/webcams/add)
+2. Fill in:
+   - **Location:** SVO Observatory GPS coordinates
+   - **Name:** `SVO Observatory All-Sky Camera`
+   - **Description:** ZWO ASI 224MC 180° all-sky camera
+   - **Image URL:** `https://svo.space/allsky/Current.jpg`
+3. Submit — Windy approves within a few days
 
-```ini
-[allsky]
-image_path = C:\allsky\tmp\image.jpg   ← adjust to where AllSky writes its image
-
-[ftp]
-host     = files.hostinger.com
-username = YOUR_FTP_USERNAME
-password = YOUR_FTP_PASSWORD
-
-[logging]
-log_file = C:\allsky-windy\allsky_windy.log
-```
+> The Windy API key is **not needed** for webcam registration. It is only used if you later want to query Windy's webcam database via their read-only API.
 
 ---
 
-### Step 4 — Test it manually first
+### Step 3 — Done
 
-Open a Command Prompt, navigate to the folder and run:
+Windy will start fetching `Current.jpg` automatically once approved. No script needs to run on the observatory PC for Windy to work — AllSky handles the upload natively.
 
+---
+
+## Optional: image freshness monitor
+
+`allsky_windy.py` is an optional companion that watches the AllSky output file on disk and logs a warning if it stops updating. Useful for catching AllSky outages early.
+
+### Run manually
 ```cmd
 cd C:\allsky-windy
 python allsky_windy.py
 ```
 
-You should see a line like:
-```
-FTP upload OK — 190432 bytes → files.hostinger.com/public_html/allsky/Current.jpg  (total: 1)
-```
+### Run on boot (Windows Task Scheduler)
 
-Open `https://svo.space/allsky/Current.jpg` in a browser to confirm the image updated.  
-Press **Ctrl+C** to stop.
+1. Edit `windows\allsky-windy-task.xml` — update the Python and script paths
+2. Right-click `windows\install.bat` → **Run as administrator**
 
----
-
-### Step 5 — Register as a Windows scheduled task (auto-start)
-
-**Edit `windows\allsky-windy-task.xml` first** — update the Python path and script path:
-
-```xml
-<Command>C:\Python312\python.exe</Command>   ← match your Python install path
-<Arguments>C:\allsky-windy\allsky_windy.py --config C:\allsky-windy\config.ini</Arguments>
-<WorkingDirectory>C:\allsky-windy</WorkingDirectory>
-```
-
-Then run `windows\install.bat` as Administrator (right-click → Run as administrator).
-
-Or import manually:
-1. Open **Task Scheduler** (search in Start menu)
-2. **Action → Import Task...** → select `windows\allsky-windy-task.xml`
-3. Click OK
-
-Verify it's registered:
 ```cmd
+# Check status
 schtasks /query /tn "AllSky-Windy-Uploader"
+
+# View logs
+type C:\allsky-windy\allsky_windy.log
 ```
 
-The task starts automatically on boot and restarts itself if it crashes.
+### Configuration (`config.ini`)
 
----
+Copy `config.ini.example` → `config.ini` and set `image_path` to where AllSky writes its image.
 
-### Step 6 — Enable Windy POST uploads
-
-Once Windy confirms their upload endpoint:
-
-1. Set `upload_endpoint = <url>` in `config.ini`
-2. Confirm `api_key` is set
-3. Set `enabled = true`
-4. Restart the task:
-   ```cmd
-   schtasks /end /tn "AllSky-Windy-Uploader"
-   schtasks /run /tn "AllSky-Windy-Uploader"
-   ```
-
----
-
-## Finding the AllSky image path on Windows
-
-AllSky writes the current frame to a configurable path. Check AllSky's settings for the output directory. Common locations:
-
-- `C:\allsky\tmp\image.jpg`
-- `C:\Users\<username>\allsky\tmp\image.jpg`
-- Wherever AllSky was installed + `\tmp\image.jpg`
-
-Run this in PowerShell to search:
-```powershell
-Get-ChildItem C:\ -Recurse -Filter "image.jpg" -ErrorAction SilentlyContinue | Select-Object FullName
-```
+| Key | Default | Description |
+|-----|---------|-------------|
+| `allsky.image_path` | `C:\allsky\tmp\image.jpg` | Path AllSky writes its current frame to |
+| `allsky.stale_threshold_seconds` | `120` | Warn if image hasn't updated in this many seconds |
+| `logging.level` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
+| `logging.log_file` | *(blank)* | Optional log file path |
 
 ---
 
 ## Troubleshooting
 
-**FTP upload fails**
-- Check credentials in `config.ini` — host/username/password
-- Try the Hostinger FTP hostname from hPanel (may differ from `files.hostinger.com`)
-- Check the log file: `C:\allsky-windy\allsky_windy.log`
+**Windy shows a stale image**
+Fix the `.htaccess` cache header (Step 1). Run `curl -sI https://svo.space/allsky/Current.jpg | grep cache-control` to confirm.
 
-**Image not found warning**
-- Confirm AllSky is running and capturing
-- Check `image_path` in `config.ini` points to the right file
+**Image stops updating on svo.space**
+Check AllSky is running and its FTP upload is configured. The monitor script will log a staleness warning after 120 s.
 
-**Task doesn't start on boot**
-- Open Task Scheduler, find `AllSky-Windy-Uploader`, check Last Run Result
-- Re-run `install.bat` as Administrator
+**Windy registration not approved**
+Contact webcams@windy.com — approvals normally take 1–3 days.
 
-**Windy shows old image**
-- Confirm the `.htaccess` cache fix is applied (Step 1)
-- Run: `curl -sI https://svo.space/allsky/Current.jpg | grep cache-control`
+---
+
+## Issue reporting (for Randy)
+
+Drop screenshots in `screenshots/new/` and notes/logs in `context/new/`, then open a pull request.
 
 ---
 
@@ -185,19 +132,12 @@ Get-ChildItem C:\ -Recurse -Filter "image.jpg" -ErrorAction SilentlyContinue | S
 
 | File | Purpose |
 |------|---------|
-| `allsky_windy.py` | Main uploader — works on Windows and Linux |
-| `config.ini.example` | Config template — copy to `config.ini` |
+| `allsky_windy.py` | Optional image freshness monitor |
+| `config.ini.example` | Config template |
 | `hostinger/.htaccess` | Upload to `public_html/allsky/` on Hostinger |
-| `windows/allsky-windy-task.xml` | Windows Task Scheduler definition |
+| `windows/allsky-windy-task.xml` | Task Scheduler definition |
 | `windows/install.bat` | Registers the scheduled task (run as Admin) |
-| `context/new/` | Drop logs/notes about issues here for review |
-| `screenshots/new/` | Drop screenshots of issues here for review |
-
----
-
-## Issue reporting
-
-Randy: drop screenshots in `screenshots/new/` and notes/logs in `context/new/`, then open a pull request. We'll diagnose and push fixes.
+| `docs/how-to.docx` | Step-by-step install guide for Randy |
 
 ---
 

@@ -1,52 +1,28 @@
 # allsky_windy configuration
-# Copy this file to config.ini and fill in your credentials.
-# config.ini is in .gitignore so passwords are never committed.
+# Copy this file to config.ini and edit the image_path for your system.
+# This script is optional — it only monitors image freshness.
+# Windy.com pulls directly from https://svo.space/allsky/Current.jpg
 
 [allsky]
-# Full path to the image AllSky overwrites on every capture.
+# Path to the image AllSky overwrites on every capture.
 #
-# Windows example:
+# Windows:
 image_path = C:\allsky\tmp\image.jpg
 #
-# Linux / Raspberry Pi example:
+# Linux / Raspberry Pi:
 # image_path = /home/pi/allsky/tmp/image.jpg
 
-[ftp]
-# Hostinger FTP credentials — find these in hPanel → FTP Accounts
-host     = files.hostinger.com
-username = YOUR_FTP_USERNAME
-password = YOUR_FTP_PASSWORD
-
-# Path on the server relative to FTP root (which maps to public_html/)
-remote_path = public_html/allsky/Current.jpg
-
-# How often to upload a fresh image (seconds). 60 = once per minute.
-upload_interval_seconds = 60
-
-# FTP connection timeout in seconds
-timeout_seconds = 30
-
-[windy]
-# Your Windy.com API key
-api_key = YOUR_WINDY_API_KEY
-
-# Upload endpoint — fill in once Windy confirms the URL.
-# Leave blank to skip the Windy POST step for now.
-upload_endpoint =
-
-# Set to true to enable Windy POST uploads (requires upload_endpoint above)
-enabled = false
+# Warn if the image hasn't updated in this many seconds (default: 120)
+stale_threshold_seconds = 120
 
 [logging]
-# Log verbosity: DEBUG, INFO, WARNING, ERROR
+# DEBUG / INFO / WARNING / ERROR
 level = INFO
 
-# Log file path. Recommended on Windows so you can review logs easily.
-# Windows example:
+# Log file path — recommended on Windows so you can review it easily.
+# Windows:
 log_file = C:\allsky-windy\allsky_windy.log
-#
-# Linux example:
+# Linux:
 # log_file = /home/pi/allsky_windy.log
-#
 # Leave blank to log to console only:
 # log_file =
