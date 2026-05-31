@@ -31,6 +31,7 @@ import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from typing import Optional
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +80,7 @@ class ImageWatcher(threading.Thread):
         self.stale_threshold = stale_threshold
         self._last_mtime: float = 0.0
         self._last_size: int = 0
-        self.last_update: datetime | None = None
+        self.last_update: Optional[datetime] = None
         self._lock = threading.Lock()
 
     def get_status(self) -> dict:
