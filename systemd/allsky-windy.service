@@ -1,0 +1,28 @@
+# systemd service unit for allsky_windy.py
+#
+# Install:
+#   sudo cp allsky-windy.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable allsky-windy
+#   sudo systemctl start allsky-windy
+#
+# View logs:
+#   sudo journalctl -u allsky-windy -f
+
+[Unit]
+Description=AllSky → Windy.com Webcam Image Server
+After=network-online.target allsky.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/allsky-windy
+ExecStart=/usr/bin/python3 /home/pi/allsky-windy/allsky_windy.py --config /home/pi/allsky-windy/config.ini
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

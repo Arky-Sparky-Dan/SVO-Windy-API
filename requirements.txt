@@ -1,0 +1,6 @@
+# allsky_windy has no third-party runtime dependencies.
+# It uses only Python 3.9+ standard library modules:
+#   http.server, configparser, json, logging, pathlib, signal, threading
+
+# Python version requirement
+# python_requires >= 3.9

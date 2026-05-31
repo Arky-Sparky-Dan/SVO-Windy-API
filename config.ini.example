@@ -1,0 +1,30 @@
+# allsky_windy configuration
+# Copy this file to config.ini and edit the values for your setup.
+# config.ini is excluded from git (so passwords never get committed).
+
+[allsky]
+# Full path to the latest AllSky output image.
+# AllSky overwrites this file on every capture.
+# Default AllSkyTeam/allsky path on Raspberry Pi:
+image_path = /home/pi/allsky/tmp/image.jpg
+
+# How long (seconds) before we consider the image stale and log a warning.
+# Set to ~2x your AllSky capture interval. Default: 120 (2 minutes).
+stale_threshold_seconds = 120
+
+[server]
+# Network interface to listen on. 0.0.0.0 = all interfaces (recommended).
+host = 0.0.0.0
+
+# TCP port for the HTTP server.
+# If you use a non-standard port, include it in the URL you give Windy:
+#   http://YOUR_PUBLIC_IP:8080/image.jpg
+port = 8080
+
+[logging]
+# Log verbosity: DEBUG, INFO, WARNING, ERROR
+level = INFO
+
+# Optional log file path. Leave blank to log to stdout only.
+# Example: log_file = /home/pi/allsky_windy.log
+log_file =
