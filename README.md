@@ -1,166 +1,153 @@
-# AllSky → Windy.com Webcam Image Server
+# SVO Observatory — Windy.com Webcam Integration
 
-Serves your AllSky all-sky camera image over HTTP so **Windy.com** can pull it for their live webcam map.
+Connects the **ZWO ASI 224MC** all-sky camera at SVO Observatory to **Windy.com's** live webcam map.
 
-Built for the **ZWO ASI 224MC** camera running **AllSky** on a Raspberry Pi / Linux observatory PC.
+**Live image:** `https://svo.space/allsky/Current.jpg`
+**Observatory site:** https://SVO.space/current-sky/
 
 ---
 
-## How it works
+## How Windy works
 
-Windy.com uses a **pull model** for webcam images — you host your latest image at a public URL, and Windy fetches it on their schedule (approximately every 60 seconds). This script:
-
-1. Watches the image file that AllSky continuously overwrites with each capture
-2. Serves it at `http://YOUR_IP:8080/image.jpg`
-3. Logs image freshness so you can see it's updating
+Windy.com uses a **pull model** — you give them a public image URL and they fetch it on their schedule (~every 60 seconds). No upload API exists; the image just needs to be at a stable, publicly accessible URL.
 
 ```
-AllSky (ASI 224MC)
-       │  writes image every N seconds
-       ▼
-  ~/allsky/tmp/image.jpg
-       │
-       ▼
-  allsky_windy.py  (HTTP server, port 8080)
-       │
-       ▼  Windy.com pulls /image.jpg ~every 60 s
-  windy.com/webcams/...  ←  your observatory appears here
+ASI 224MC camera
+      │
+      ▼
+  AllSky (captures every N seconds, overwrites Current.jpg)
+      │
+      ▼
+  https://svo.space/allsky/Current.jpg   ← stable public URL
+      │
+      ▼  Windy fetches ~every 60 s
+  windy.com/webcams/...  ← SVO Observatory appears here
 ```
 
 ---
 
-## Requirements
+## Current status
 
-- Python 3.9 or newer (standard library only — no pip installs needed)
-- AllSky running and writing images to `~/allsky/tmp/image.jpg`
-- A way to expose port 8080 publicly (see [Making it public](#making-it-public))
+| Item | Status |
+|------|--------|
+| AllSky running + capturing | ✅ |
+| Image publicly accessible | ✅ `https://svo.space/allsky/Current.jpg` |
+| Cache-Control header fixed | ⚠️ see below |
+| Windy webcam registered | ⏳ pending |
 
 ---
 
-## Installation
+## ⚠️ Fix required: Cache-Control header
+
+The web server currently sends `Cache-Control: public, max-age=604800` (7 days) for `Current.jpg`. This means CDNs and Windy's fetcher may serve a week-old image instead of the latest frame.
+
+**Fix on the web server** — add a location rule for `Current.jpg` to send a short max-age. Example for **nginx**:
+
+```nginx
+location = /allsky/Current.jpg {
+    expires 30s;
+    add_header Cache-Control "public, max-age=30, must-revalidate";
+}
+```
+
+For **Apache** (`.htaccess` or vhost config):
+
+```apache
+<Files "Current.jpg">
+    Header set Cache-Control "public, max-age=30, must-revalidate"
+    Header set Expires "30"
+</Files>
+```
+
+After updating, verify with:
 
 ```bash
-# 1. Clone the repo onto your observatory PC
-git clone https://github.com/YOUR_USERNAME/SVO-Windy-API.git
-cd SVO-Windy-API
-
-# 2. Copy and edit the config file
-cp config.ini.example config.ini
-nano config.ini        # set image_path to your AllSky output image
-
-# 3. Run it
-python3 allsky_windy.py
-
-# Open http://localhost:8080 in a browser to confirm it's working
+curl -sI https://svo.space/allsky/Current.jpg | grep -i cache
+# Should show: cache-control: public, max-age=30, must-revalidate
 ```
 
 ---
 
-## Configuration (`config.ini`)
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `allsky.image_path` | `~/allsky/tmp/image.jpg` | Full path to the AllSky live image |
-| `allsky.stale_threshold_seconds` | `120` | Warn if image hasn't updated in this many seconds |
-| `server.host` | `0.0.0.0` | Bind address (`0.0.0.0` = all interfaces) |
-| `server.port` | `8080` | HTTP port |
-| `logging.level` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
-| `logging.log_file` | *(blank)* | Optional log file path |
-
----
-
-## Making it public
-
-Windy needs to reach your image from the internet. Pick one option:
-
-### Option A — Router port forwarding (recommended for permanent setups)
-1. Log into your router admin page (usually `192.168.1.1`)
-2. Add a port forwarding rule: **external port 8080 → your observatory PC IP:8080**
-3. Find your public IP at [whatismyip.com](https://www.whatismyip.com)
-4. Your image URL will be: `http://YOUR_PUBLIC_IP:8080/image.jpg`
-
-### Option B — Cloudflare Tunnel (no router access needed, free)
-```bash
-# Install cloudflared on the observatory PC
-curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64 -o cloudflared
-chmod +x cloudflared
-
-# Start a quick tunnel (gives you a public https URL)
-./cloudflared tunnel --url http://localhost:8080
-# Copy the https://xxxx.trycloudflare.com URL — use that as your Windy image URL
-```
-
-### Option C — ngrok (simplest for testing)
-```bash
-# Install ngrok: https://ngrok.com/download
-ngrok http 8080
-# Copy the https://xxxx.ngrok.io URL
-```
-
----
-
-## Register your webcam on Windy.com
+## Register on Windy.com
 
 1. Go to [windy.com/webcams/add](https://www.windy.com/webcams/add)
-2. Fill in your location, camera name (e.g. "SVO Observatory All-Sky"), and description
-3. In the **image URL** field, paste your public URL: `http://YOUR_PUBLIC_IP:8080/image.jpg`
-4. Submit for review — Windy typically approves within a few days
+2. Fill in:
+   - **Location:** SVO Observatory coordinates
+   - **Name:** e.g. `SVO Observatory All-Sky Camera`
+   - **Description:** ZWO ASI 224MC fisheye all-sky camera
+   - **Image URL:** `https://svo.space/allsky/Current.jpg`
+3. Submit — Windy reviews and approves within a few days
 
 ---
 
-## Run as a systemd service (auto-start on boot)
+## Optional: `allsky_windy.py` monitoring companion
+
+The script in this repo is **not required** for Windy integration (the image is already public), but it provides:
+
+- Live logging of every time the image file updates on disk
+- Staleness warnings if AllSky stops capturing
+- A `/status` JSON health endpoint
+- A local browser preview page at `http://localhost:8080`
+
+### Run it
 
 ```bash
-# Edit the service file first — update User and WorkingDirectory paths
-nano systemd/allsky-windy.service
+cp config.ini.example config.ini
+# Edit config.ini — set image_path to your AllSky output file
+python3 allsky_windy.py
+```
 
+### Run as a systemd service (auto-start on boot)
+
+```bash
+nano systemd/allsky-windy.service   # update User and WorkingDirectory
 sudo cp systemd/allsky-windy.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable allsky-windy
 sudo systemctl start allsky-windy
-
-# Check it's running
-sudo systemctl status allsky-windy
-
-# Live logs
-sudo journalctl -u allsky-windy -f
+sudo journalctl -u allsky-windy -f  # live logs
 ```
 
----
+### Configuration (`config.ini`)
 
-## HTTP endpoints
+| Key | Default | Description |
+|-----|---------|-------------|
+| `allsky.image_path` | `~/allsky/tmp/image.jpg` | Path AllSky writes its current frame to |
+| `allsky.stale_threshold_seconds` | `120` | Warn if image hasn't updated in this many seconds |
+| `server.port` | `8080` | Local HTTP port for the companion server |
+| `logging.level` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
+| `logging.log_file` | *(blank)* | Optional log file path |
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /image.jpg` | Latest AllSky frame — this is the URL you give Windy |
-| `GET /status` | JSON health check (last update time, file size, age) |
-| `GET /` | Browser-friendly status page with live image preview |
+### Endpoints
+
+| URL | Description |
+|-----|-------------|
+| `GET /image.jpg` | Serves the AllSky image directly from disk |
+| `GET /status` | JSON: last update time, age, file size |
+| `GET /` | Browser status page with live image preview |
 
 ---
 
 ## Troubleshooting
 
-**Image not found (503 error)**
-- Confirm AllSky is running: `systemctl status allsky`
-- Check the `image_path` in `config.ini` matches where AllSky actually writes its image
-- On AllskyTeam/allsky the path is typically `/home/pi/allsky/tmp/image.jpg`
+**Windy shows a stale image**
+- Fix the `Cache-Control` header (see above) — most likely cause
 
-**Image appears stale / not updating**
-- Check AllSky is capturing: open AllSky's web interface
-- The `stale_threshold_seconds` warning in the logs will tell you how old the image is
+**AllSky stops updating**
+- `systemctl status allsky` on the observatory PC
+- The monitoring companion will log a staleness warning after 120 s
 
-**Windy can't reach the image**
-- Confirm the server is running: `curl http://localhost:8080/image.jpg -o /tmp/test.jpg`
-- Confirm it's reachable from outside: try your public URL from a mobile browser (not on your home WiFi)
-- Check your router's port forwarding rule or confirm the tunnel is still running
+**Image returns 404 or 500**
+- Confirm AllSky is writing to the path in `config.ini`
+- Typical path on AllskyTeam/allsky: `/home/pi/allsky/tmp/image.jpg`
 
 ---
 
-## ASI 224MC + AllSky notes
+## ASI 224MC notes
 
-- AllSky captures full 180° fisheye frames from the ASI 224MC at whatever interval you configure (typically 30–120 seconds at night)
-- The script monitors the output file and logs whenever it changes
-- During the day AllSky may capture less frequently or stop — the stale warning will alert you
+- Full 180° fisheye frames, typically captured every 30–120 seconds at night
+- During the day AllSky may slow down or pause capture
+- Image is overwritten in-place as `Current.jpg` on each capture
 
 ---
 
