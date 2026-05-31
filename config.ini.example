@@ -1,30 +1,42 @@
 # allsky_windy configuration
-# Copy this file to config.ini and edit the values for your setup.
-# config.ini is excluded from git (so passwords never get committed).
+# Copy this file to config.ini and fill in your credentials.
+# config.ini is in .gitignore so passwords are never committed.
 
 [allsky]
-# Full path to the latest AllSky output image.
-# AllSky overwrites this file on every capture.
-# Default AllSkyTeam/allsky path on Raspberry Pi:
+# Full path to the image AllSky overwrites on every capture.
+# AllskyTeam/allsky default on Raspberry Pi:
 image_path = /home/pi/allsky/tmp/image.jpg
 
-# How long (seconds) before we consider the image stale and log a warning.
-# Set to ~2x your AllSky capture interval. Default: 120 (2 minutes).
-stale_threshold_seconds = 120
+[ftp]
+# Hostinger FTP credentials — find these in hPanel → FTP Accounts
+host     = files.hostinger.com
+username = YOUR_FTP_USERNAME
+password = YOUR_FTP_PASSWORD
 
-[server]
-# Network interface to listen on. 0.0.0.0 = all interfaces (recommended).
-host = 0.0.0.0
+# Path on the server (relative to FTP root, which is usually public_html)
+remote_path = public_html/allsky/Current.jpg
 
-# TCP port for the HTTP server.
-# If you use a non-standard port, include it in the URL you give Windy:
-#   http://YOUR_PUBLIC_IP:8080/image.jpg
-port = 8080
+# How often to upload a fresh image (seconds). 60 = once per minute.
+upload_interval_seconds = 60
+
+# FTP connection timeout in seconds
+timeout_seconds = 30
+
+[windy]
+# Your Windy.com API key
+api_key = YOUR_WINDY_API_KEY
+
+# Upload endpoint — to be filled in once Windy confirms the URL.
+# Leave blank until then; the script will skip the Windy POST step.
+upload_endpoint =
+
+# Set to true to enable Windy POST uploads (requires upload_endpoint above)
+enabled = false
 
 [logging]
 # Log verbosity: DEBUG, INFO, WARNING, ERROR
 level = INFO
 
-# Optional log file path. Leave blank to log to stdout only.
-# Example: log_file = /home/pi/allsky_windy.log
+# Optional log file. Leave blank to log to stdout only.
+# log_file = /home/pi/allsky_windy.log
 log_file =
